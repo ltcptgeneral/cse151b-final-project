@@ -58,6 +58,4 @@ for i in range(epochs):
 
 plt.plot(losses, color="green", label="Training Loss")
 plt.legend(loc = 'upper left')
-plt.show()
-
-
+plt.savefig("plot.png")

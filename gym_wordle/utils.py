@@ -35,7 +35,7 @@ def to_array(word: str) -> npt.NDArray[np.int64]:
     return np.array([_char_d[c] for c in word])
 
 
-def get_words(category: str, build: bool=False) -> npt.NDArray[np.int64]:
+def get_words(category: str, build: bool = False) -> npt.NDArray[np.int64]:
     """Loads a list of words in array form. 
 
     If specified, this will recompute the list from the human-readable list of
@@ -53,14 +53,14 @@ def get_words(category: str, build: bool=False) -> npt.NDArray[np.int64]:
         five.
     """
     assert category in {'guess', 'solution'}
-    
+
     arr_path = Path(__file__).parent / f'dictionary/{category}_list.npy'
     if build:
-       list_path = Path(__file__).parent / f'dictionary/{category}_list.csv'
+        list_path = Path(__file__).parent / f'dictionary/{category}_list.csv'
 
-       with open(list_path, 'r') as f:
-           words = np.array([to_array(line.strip()) for line in f])
-           np.save(arr_path, words)
+        with open(list_path, 'r') as f:
+            words = np.array([to_array(line.strip()) for line in f])
+            np.save(arr_path, words)
 
     return np.load(arr_path)
 
@@ -69,16 +69,16 @@ def play():
     """Play Wordle yourself!"""
     import gym
     import gym_wordle
-    
+
     env = gym.make('Wordle-v0')  # load the environment
-    
+
     env.reset()
     solution = to_english(env.unwrapped.solution_space[env.solution]).upper()  # no peeking!
 
     done = False
-    
+
     while not done:
-        action = -1 
+        action = -1
 
         # in general, the environment won't be forgiving if you input an
         # invalid word, but for this function I want to let you screw up user
@@ -86,8 +86,8 @@ def play():
         while not env.action_space.contains(action):
             guess = input('Guess: ')
             action = env.unwrapped.action_space.index_of(to_array(guess))
-    
+
         state, reward, done, info = env.step(action)
         env.render()
-    
+
     print(f"The word was {solution}")

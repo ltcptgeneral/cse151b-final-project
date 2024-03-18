@@ -6,6 +6,7 @@ from sty import fg, bg, ef, rs
 from collections import Counter
 from gym_wordle.utils import to_english, to_array, get_words
 from typing import Optional
+from collections import defaultdict
 
 
 class WordList(gym.spaces.Discrete):
@@ -160,7 +161,14 @@ class WordleEnv(gym.Env):
 
         self.n_rounds = 6
         self.n_letters = 5
-        self.info = {'correct': False, 'guesses': set()}
+        self.info = {
+            'correct': False,
+            'guesses': set(),
+            'known_positions': np.full(5, -1),  # -1 for unknown, else letter index
+            'known_letters': set(),  # Letters known to be in the word
+            'not_in_word': set(),  # Letters known not to be in the word
+            'tried_positions': defaultdict(set)  # Positions tried for each letter
+        }
 
     def _highlighter(self, char: str, flag: int) -> str:
         """Terminal renderer functionality. Properly highlights a character
@@ -192,12 +200,56 @@ class WordleEnv(gym.Env):
         """
         self.round = 0
         self.solution = self.solution_space.sample()
+        self.soln_hash = set(self.solution_space[self.solution])
 
         self.state = np.zeros((self.n_rounds, 2 * self.n_letters), dtype=np.int64)
 
-        self.info = {'correct': False, 'guesses': set()}
+        self.info = {
+            'correct': False,
+            'guesses': set(),
+            'known_positions': np.full(5, -1),
+            'known_letters': set(),
+            'not_in_word': set(),
+            'tried_positions': defaultdict(set)
+        }
+
+        self.simulate_first_guess()
 
         return self.state, self.info
+
+    def simulate_first_guess(self):
+        fixed_first_guess = "rates"
+        fixed_first_guess_array = to_array(fixed_first_guess)
+
+        # Simulate the feedback for each letter in the fixed first guess
+        feedback = np.zeros(self.n_letters, dtype=int)  # Initialize feedback array
+        for i, letter in enumerate(fixed_first_guess_array):
+            if letter in self.solution_space[self.solution]:
+                if letter == self.solution_space[self.solution][i]:
+                    feedback[i] = 1  # Correct position
+                else:
+                    feedback[i] = 2  # Correct letter, wrong position
+            else:
+                feedback[i] = 3  # Letter not in word
+
+        # Update the state to reflect the fixed first guess and its feedback
+        self.state[0, :self.n_letters] = fixed_first_guess_array
+        self.state[0, self.n_letters:] = feedback
+
+        # Update self.info based on the feedback
+        for i, flag in enumerate(feedback):
+            if flag == self.right_pos:
+                # Mark letter as correctly placed
+                self.info['known_positions'][i] = fixed_first_guess_array[i]
+            elif flag == self.wrong_pos:
+                # Note the letter is in the word but in a different position
+                self.info['known_letters'].add(fixed_first_guess_array[i])
+            elif flag == self.wrong_char:
+                # Note the letter is not in the word
+                self.info['not_in_word'].add(fixed_first_guess_array[i])
+
+        # Since we're simulating the first guess, increment the round counter
+        self.round = 1
 
     def render(self, mode: str = 'human'):
         """Renders the Wordle environment.
@@ -220,67 +272,69 @@ class WordleEnv(gym.Env):
             super().render(mode=mode)
 
     def step(self, action):
-        """Run one step of the Wordle game. Every game must be previously
-        initialized by a call to the `reset` method.
-
-        Args:
-            action: Word guessed by the agent.
-
-        Returns:
-            state (object): Wordle game state after the guess.
-            reward (float): Reward associated with the guess.
-            done (bool): Whether the game has ended.
-            info (dict): Auxiliary diagnostic information.
-        """
         assert self.action_space.contains(action), 'Invalid word!'
 
-        action = self.action_space[action]
-        solution = self.solution_space[self.solution]
+        guessed_word = self.action_space[action]
+        solution_word = self.solution_space[self.solution]
 
-        self.state[self.round][:self.n_letters] = action
+        reward = 0
+        correct_guess = np.array_equal(guessed_word, solution_word)
 
-        counter = Counter()
-        for i, char in enumerate(action):
-            flag_i = i + self.n_letters
-            counter[char] += 1
+        # Initialize flags for current guess
+        current_flags = np.full(self.n_letters, self.wrong_char)
 
-            if char == solution[i]:
-                self.state[self.round, flag_i] = self.right_pos
-            elif counter[char] <= (char == solution).sum():
-                self.state[self.round, flag_i] = self.wrong_pos
+        # Track newly discovered information
+        new_info = False
+
+        for i in range(self.n_letters):
+            guessed_letter = guessed_word[i]
+            if guessed_letter in solution_word:
+                # Penalize for reusing a letter found to not be in the word
+                if guessed_letter in self.info['not_in_word']:
+                    reward -= 2
+
+                # Handle correct letter in the correct position
+                if guessed_letter == solution_word[i]:
+                    current_flags[i] = self.right_pos
+                    if self.info['known_positions'][i] != guessed_letter:
+                        reward += 10  # Large reward for new correct placement
+                        new_info = True
+                        self.info['known_positions'][i] = guessed_letter
+                    else:
+                        reward += 20  # Large reward for repeating correct placement
+                else:
+                    current_flags[i] = self.wrong_pos
+                    if guessed_letter not in self.info['known_letters'] or i not in self.info['tried_positions'][guessed_letter]:
+                        reward += 10  # Reward for guessing a letter in a new position
+                        new_info = True
+                    else:
+                        reward -= 20  # Penalize for not leveraging known information
+                    self.info['known_letters'].add(guessed_letter)
+                    self.info['tried_positions'][guessed_letter].add(i)
             else:
-                self.state[self.round, flag_i] = self.wrong_char
+                # New incorrect letter
+                if guessed_letter not in self.info['not_in_word']:
+                    reward -= 2  # Penalize for guessing a letter not in the word
+                    self.info['not_in_word'].add(guessed_letter)
+                    new_info = True
+                else:
+                    reward -= 15  # Larger penalty for repeating an incorrect letter
+
+        # Update observation state with the current guess and flags
+        self.state[self.round, :self.n_letters] = guessed_word
+        self.state[self.round, self.n_letters:] = current_flags
+
+        # Check if the game is over
+        done = self.round == self.n_rounds - 1 or correct_guess
+        self.info['correct'] = correct_guess
+
+        if correct_guess:
+            reward += 100  # Major reward for winning
+        elif done:
+            reward -= 50  # Penalty for losing without using new information effectively
+        elif not new_info:
+            reward -= 10  # Penalty if no new information was used in this guess
 
         self.round += 1
 
-        correct = (action == solution).all()
-        game_over = (self.round == self.n_rounds)
-
-        done = correct or game_over
-
-        reward = 0
-        # correct spot
-        reward += np.sum(self.state[:, 5:] == 1) * 2
-
-        # correct letter not correct spot
-        reward += np.sum(self.state[:, 5:] == 2) * 1
-
-        # incorrect letter
-        reward += np.sum(self.state[:, 5:] == 3) * -1
-
-        # guess same word as before
-        hashable_action = tuple(action)
-        if hashable_action in self.info['guesses']:
-            reward += -10
-        else:  # guess different word
-            reward += 10
-
-        self.info['guesses'].add(hashable_action)
-
-        # for game ending in win or loss
-        reward += 10 if correct else -10 if done else 0
-
-        self.info['correct'] = correct
-
-        # observation, reward, terminated, truncated, info
         return self.state, reward, done, False, self.info

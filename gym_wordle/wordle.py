@@ -150,7 +150,14 @@ class WordleEnv(gym.Env):
         self.action_space = GuessList()
         self.solution_space = SolutionList()
 
-        self.observation_space = WordleObsSpace()
+        # Example setup based on the flattened state size you're now using
+        num_position_availability = 26 * 5  # 26 letters for each of the 5 positions
+        num_global_availability = 26  # Global letter availability
+        num_letter_found_flags = 5  # One flag for each position
+        total_size = num_position_availability + num_global_availability + num_letter_found_flags
+
+        # Define the observation space to match the flattened state format
+        self.observation_space = gym.spaces.Box(low=0, high=2, shape=(total_size,), dtype=np.float32)
 
         self._highlights = {
             self.right_pos: (bg.green, bg.rs),
@@ -169,6 +176,7 @@ class WordleEnv(gym.Env):
             'not_in_word': set(),  # Letters known not to be in the word
             'tried_positions': defaultdict(set)  # Positions tried for each letter
         }
+        self.reset()
 
     def _highlighter(self, char: str, flag: int) -> str:
         """Terminal renderer functionality. Properly highlights a character
@@ -202,7 +210,11 @@ class WordleEnv(gym.Env):
         self.solution = self.solution_space.sample()
         self.soln_hash = set(self.solution_space[self.solution])
 
-        self.state = np.zeros((self.n_rounds, 2 * self.n_letters), dtype=np.int64)
+        self.state = {
+            'position_availability': [np.ones(26) for _ in range(5)],  # Each position can initially have any letter
+            'global_availability': np.ones(26),  # Initially, all letters are available
+            'letter_found': np.zeros(5)  # Initially, no correct letters are found
+        }
 
         self.info = {
             'correct': False,
@@ -215,41 +227,32 @@ class WordleEnv(gym.Env):
 
         self.simulate_first_guess()
 
-        return self.state, self.info
+        return self.get_observation(), self.info
 
     def simulate_first_guess(self):
-        fixed_first_guess = "rates"
-        fixed_first_guess_array = to_array(fixed_first_guess)
+        fixed_first_guess = "rates"  # Example: Using 'rates' as the fixed first guess
+        # Convert the fixed guess into the appropriate format (e.g., indices of letters)
+        fixed_guess_indices = to_array(fixed_first_guess)
+        solution_indices = self.solution_space[self.solution]
 
-        # Simulate the feedback for each letter in the fixed first guess
-        feedback = np.zeros(self.n_letters, dtype=int)  # Initialize feedback array
-        for i, letter in enumerate(fixed_first_guess_array):
-            if letter in self.solution_space[self.solution]:
-                if letter == self.solution_space[self.solution][i]:
-                    feedback[i] = 1  # Correct position
-                else:
-                    feedback[i] = 2  # Correct letter, wrong position
-            else:
-                feedback[i] = 3  # Letter not in word
-
-        # Update the state to reflect the fixed first guess and its feedback
-        self.state[0, :self.n_letters] = fixed_first_guess_array
-        self.state[0, self.n_letters:] = feedback
-
-        # Update self.info based on the feedback
-        for i, flag in enumerate(feedback):
-            if flag == self.right_pos:
-                # Mark letter as correctly placed
-                self.info['known_positions'][i] = fixed_first_guess_array[i]
-            elif flag == self.wrong_pos:
-                # Note the letter is in the word but in a different position
-                self.info['known_letters'].add(fixed_first_guess_array[i])
-            elif flag == self.wrong_char:
-                # Note the letter is not in the word
-                self.info['not_in_word'].add(fixed_first_guess_array[i])
-
-        # Since we're simulating the first guess, increment the round counter
-        self.round = 1
+        for pos in range(5):  # Iterate over each position in the word
+            letter_idx = fixed_guess_indices[pos]
+            if letter_idx == solution_indices[pos]:  # Correct letter in the correct position
+                self.state['position_availability'][pos] = np.zeros(26)
+                self.state['position_availability'][pos][letter_idx] = 1
+                self.state['letter_found'][pos] = 1
+            elif letter_idx in solution_indices:  # Correct letter in the wrong position
+                self.state['position_availability'][pos][letter_idx] = 0
+                # Mark this letter as still available in other positions
+                for other_pos in range(5):
+                    if self.state['letter_found'][other_pos] == 0:  # If not already found
+                        self.state['position_availability'][other_pos][letter_idx] = 1
+            else:  # Letter not in the word
+                self.state['global_availability'][letter_idx] = 0
+                # Update all positions to reflect this letter is not in the word
+                for other_pos in range(5):
+                    self.state['position_availability'][other_pos][letter_idx] = 0
+        self.round = 1  # Increment round to reflect that first guess has been simulated
 
     def render(self, mode: str = 'human'):
         """Renders the Wordle environment.
@@ -280,49 +283,46 @@ class WordleEnv(gym.Env):
         reward = 0
         correct_guess = np.array_equal(guessed_word, solution_word)
 
-        # Initialize flags for current guess
-        current_flags = np.full(self.n_letters, self.wrong_char)
+        # Initialize flags for current guess based on the new state structure
+        current_flags = np.zeros((self.n_letters, 26))  # Replaced with a more detailed flag system
 
         # Track newly discovered information
         new_info = False
 
         for i in range(self.n_letters):
-            guessed_letter = guessed_word[i]
+            guessed_letter = guessed_word[i] - 1
             if guessed_letter in solution_word:
-                # Penalize for reusing a letter found to not be in the word
                 if guessed_letter in self.info['not_in_word']:
-                    reward -= 2
+                    reward -= 2  # Penalize for reusing a letter found to not be in the word
 
-                # Handle correct letter in the correct position
                 if guessed_letter == solution_word[i]:
-                    current_flags[i] = self.right_pos
-                    if self.info['known_positions'][i] != guessed_letter:
-                        reward += 10  # Large reward for new correct placement
-                        new_info = True
-                        self.info['known_positions'][i] = guessed_letter
-                    else:
-                        reward += 20  # Large reward for repeating correct placement
-                else:
-                    current_flags[i] = self.wrong_pos
-                    if guessed_letter not in self.info['known_letters'] or i not in self.info['tried_positions'][guessed_letter]:
-                        reward += 10  # Reward for guessing a letter in a new position
-                        new_info = True
-                    else:
-                        reward -= 20  # Penalize for not leveraging known information
-                    self.info['known_letters'].add(guessed_letter)
-                    self.info['tried_positions'][guessed_letter].add(i)
-            else:
-                # New incorrect letter
-                if guessed_letter not in self.info['not_in_word']:
-                    reward -= 2  # Penalize for guessing a letter not in the word
-                    self.info['not_in_word'].add(guessed_letter)
+                    # Handle correct letter in the correct position
+                    current_flags[i, :] = 0  # Set all other letters to not possible
+                    current_flags[i, guessed_letter] = 2  # Mark this letter as correct
+                    self.info['known_positions'][i] = 1  # Update known_positions
+                    reward += 10  # Reward for correct placement
                     new_info = True
                 else:
-                    reward -= 15  # Larger penalty for repeating an incorrect letter
+                    # Correct letter, wrong position
+                    if self.info['known_positions'][i] == 0:
+                        # Only update if we haven't already found the correct letter for this position
+                        current_flags[:, guessed_letter] = 2  # Mark this letter as found in another position
+                        reward += 5
+                        new_info = True
+            else:
+                # Letter not in word
+                if guessed_letter not in self.info['not_in_word']:
+                    self.info['not_in_word'].add(guessed_letter)
+                    reward -= 2  # Penalize for guessing a letter not in the word
+                    new_info = True
+                    for pos in range(self.n_letters):
+                        # Update all positions to reflect this letter is not correct
+                        current_flags[pos, guessed_letter] = 0
 
-        # Update observation state with the current guess and flags
-        self.state[self.round, :self.n_letters] = guessed_word
-        self.state[self.round, self.n_letters:] = current_flags
+            # Update global letter availability based on the guess
+            for letter in range(26):
+                if letter not in guessed_word or letter in self.info['not_in_word']:
+                    self.state['global_availability'][letter] = 0
 
         # Check if the game is over
         done = self.round == self.n_rounds - 1 or correct_guess
@@ -337,4 +337,17 @@ class WordleEnv(gym.Env):
 
         self.round += 1
 
-        return self.state, reward, done, False, self.info
+        return self.get_observation(), reward, done, False, self.info
+
+    def get_observation(self):
+        # Flatten the position-specific letter availability
+        position_availability_flat = np.concatenate(self.state['position_availability'])
+
+        # Global availability is already a 1D array, but ensure consistency in data handling
+        global_availability_flat = self.state['global_availability'].flatten()
+
+        # Concatenate all parts of the state into a single flat array for the DQN input
+        full_state_flat = np.concatenate(
+            [position_availability_flat, global_availability_flat, self.state['letter_found']])
+
+        return full_state_flat

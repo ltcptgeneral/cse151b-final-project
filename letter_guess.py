@@ -15,18 +15,17 @@ class LetterGuessingEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, valid_words, seed):
+    def __init__(self, valid_words, seed=None):
         self.action_space = spaces.Discrete(26)
-        self.observation_space = spaces.Box(low=0, high=2, shape=(26*2 + 26*4,), dtype=np.int32)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(26*2 + 26*4,), dtype=np.int32)
 
         self.valid_words = valid_words  # List of valid Wordle words
         self.target_word = ''  # Target word for the current episode
-        self.valid_words_str = '_'.join(self.valid_words) + '_'
+        self.valid_words_str = ' '.join(self.valid_words) + ' '
         self.letter_flags = None
         self.letter_positions = None
         self.guessed_letters = set()
         self.guess_prefix = ""  # Tracks the current guess prefix
-        self.round = 1
 
         self.reset()
 
@@ -47,16 +46,21 @@ class LetterGuessingEnv(gym.Env):
             self.guessed_letters.add(letter)
 
             # Update letter flags based on whether the letter is in the target word
-            if self.target_word_encoded[letter_index] == 1:
+            if self.target_word[position] == letter:
                 self.letter_flags[letter_index, :] = [1, 0]  # Update flag for correct guess
+            elif letter in self.target_word:
+                self.letter_flags[letter_index, :] = [0, 1]  # Update flag for correct guess wrong position
             else:
                 self.letter_flags[letter_index, :] = [0, 0]  # Update flag for incorrect guess
 
             reward = 1  # Reward for adding new information by trying a new letter
 
             # Update the letter_positions matrix to reflect the new guess
-            self.letter_positions[:, position] = 0
-            self.letter_positions[letter_index, position] = 1
+            if position == 4: 
+                self.letter_positions[:,:] = 1
+            else:
+                self.letter_positions[:, position] = 0
+                self.letter_positions[letter_index, position] = 1
 
         # Use regex to check if the current prefix can lead to a valid word
         if not re.search(r'\b' + self.guess_prefix, self.valid_words_str):
@@ -65,25 +69,30 @@ class LetterGuessingEnv(gym.Env):
 
         # guessed a full word so we reset our guess prefix to guess next round
         if len(self.guess_prefix) == len(self.target_word):
-            self.guess_prefix == ''
+            self.guess_prefix = ''
             self.round += 1
 
-        # end after 3 rounds of total guesses
-        if self.round == 3:
+        # end after 5 rounds of total guesses
+        if self.round == 2:
+            # reward = 5
             done = True
 
         obs = self._get_obs()
+        
+        if reward < -50:
+            print(obs, reward, done)
 
         return obs, reward, done, False, {}
 
-    def reset(self, seed):
+    def reset(self, seed=None):
         self.target_word = random.choice(self.valid_words)
-        self.target_word_encoded = self.encode_word(self.target_word)
-        self.letter_flags = np.ones((26, 2)) * 2
-        self.letter_positions = np.ones((26, 4))
+        # self.target_word_encoded = self.encode_word(self.target_word)
+        self.letter_flags = np.ones((26, 2), dtype=np.int32)
+        self.letter_positions = np.ones((26, 4), dtype=np.int32)
         self.guessed_letters = set()
         self.guess_prefix = ""  # Reset the guess prefix for the new episode
-        return self._get_obs()
+        self.round = 1
+        return self._get_obs(), {}
 
     def encode_word(self, word):
         encoded = np.zeros((26,))

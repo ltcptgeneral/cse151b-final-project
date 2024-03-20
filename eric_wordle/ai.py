@@ -17,7 +17,17 @@ class AI:
         self.possible_letters = None
 
         self.reset()
-
+        
+    def solve_eval(self, results_callback):
+        num_guesses = 0
+        while [len(e) for e in self.domains] != [1 for _ in range(self.num_letters)]:
+            num_guesses += 1
+            word = self.sample()
+            results = results_callback(word)
+            self.arc_consistency(word, results)
+            # print(num_guesses, word, results)
+        return num_guesses, word
+    
     def solve(self):
         num_guesses = 0
         while [len(e) for e in self.domains] != [1 for _ in range(self.num_letters)]:
@@ -33,26 +43,29 @@ class AI:
             print('-----------------------------------------------')
             print(f'Guess #{num_guesses}/{self.num_guesses}: {word}')
             print('-----------------------------------------------')
-            self.arc_consistency(word)
+
+            print(f'Performing arc consistency check on {word}...')
+            print(f'Specify 0 for completely nonexistent letter at the specified index, 1 for existent letter but incorrect index, and 2 for correct letter at correct index.')
+            results = []
+
+            # Collect results
+            for l in word:
+                while True:
+                    result = input(f'{l}: ')
+                    if result not in ['0', '1', '2']:
+                        print('Incorrect option. Try again.')
+                        continue
+                    results.append(result)
+                    break
+
+            print(results)
+
+            self.arc_consistency(word, results)
 
         print(f'You did it! The word is {"".join([e[0] for e in self.domains])}')
+        return num_guesses
 
-
-    def arc_consistency(self, word):
-        print(f'Performing arc consistency check on {word}...')
-        print(f'Specify 0 for completely nonexistent letter at the specified index, 1 for existent letter but incorrect index, and 2 for correct letter at correct index.')
-        results = []
-
-        # Collect results
-        for l in word:
-            while True:
-                result = input(f'{l}: ')
-                if result not in ['0', '1', '2']:
-                    print('Incorrect option. Try again.')
-                    continue
-                results.append(result)
-                break
-
+    def arc_consistency(self, word, results):
         self.possible_letters += [word[i] for i in range(len(word)) if results[i] == '1']
 
         for i in range(len(word)):
@@ -69,7 +82,6 @@ class AI:
                     self.domains[i].remove(word[i])
             if results[i] == '2':
                 self.domains[i] = [word[i]]
-
 
     def reset(self):
         self.domains = [list(string.ascii_lowercase) for _ in range(self.num_letters)]

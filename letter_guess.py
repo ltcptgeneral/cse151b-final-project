@@ -72,15 +72,16 @@ class LetterGuessingEnv(gym.Env):
             self.guess_prefix = ''
             self.round += 1
 
-        # end after 5 rounds of total guesses
-        if self.round == 2:
+        # end after 3 rounds of total guesses
+        if self.round == 3:
             # reward = 5
             done = True
 
         obs = self._get_obs()
         
-        if reward < -50:
+        if reward < -5:
             print(obs, reward, done)
+            exit(0)
 
         return obs, reward, done, False, {}
 
@@ -91,7 +92,7 @@ class LetterGuessingEnv(gym.Env):
         self.letter_positions = np.ones((26, 4), dtype=np.int32)
         self.guessed_letters = set()
         self.guess_prefix = ""  # Reset the guess prefix for the new episode
-        self.round = 1
+        self.round = 0
         return self._get_obs(), {}
 
     def encode_word(self, word):

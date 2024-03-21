@@ -1,3 +1,6 @@
 **/data/*
 **/*.zip
 **/__pycache__
+/env
+**/runs/*
+**/wandb/*

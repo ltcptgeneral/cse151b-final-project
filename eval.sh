@@ -1,1 +1,2 @@
-python eric_wordle/eval.py --n 1 --vocab_file wordle_words.txt  --num_eval 1000
+python eric_wordle/eval.py --n 1 --vocab_file wordle_words.txt  --num_eval 5000
+python eric_wordle/eval.py --n 1 --vocab_file wordle_words.txt  --num_eval 5000 --q_model True --model_file wordle_ppo_model

@@ -28,7 +28,7 @@ def main(args):
     if args.n is None:
         raise Exception('Need to specify n (i.e. n = 1 for wordle, n = 4 for quordle, n = 16 for sedecordle).')
 
-    ai = AI(args.vocab_file, args.model_file, use_q_model=args.q_model)
+    ai = AI(args.vocab_file, args.model_file, use_q_model=args.q_model, device=args.device)
 
     total_guesses = 0
     wins = 0
@@ -58,5 +58,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_eval', dest="num_eval", type=int, default=1000)
     parser.add_argument('--model_file', dest="model_file", type=str, default='wordle_ppo_model')
     parser.add_argument('--q_model', dest="q_model", type=bool, default=False)
+    parser.add_argument('--device', dest="device", type=str, default="cuda")
     args = parser.parse_args()
     main(args)

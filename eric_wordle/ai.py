@@ -23,7 +23,8 @@ def load_valid_words(file_path='wordle_words.txt'):
 
 
 class AI:
-    def __init__(self, vocab_file, model_file, num_letters=5, num_guesses=6, use_q_model=False):
+    def __init__(self, vocab_file, model_file, num_letters=5, num_guesses=6, use_q_model=False, device="cuda"):
+        self.device = device
         self.vocab_file = vocab_file
         self.num_letters = num_letters
         self.num_guesses = 6
@@ -41,7 +42,7 @@ class AI:
             self.q_env_state, _ = self.q_env.reset()
 
             # load model
-            self.q_model = PPO.load(model_file)
+            self.q_model = PPO.load(model_file, device=self.device)
 
         self.reset("")
 
@@ -158,7 +159,7 @@ class AI:
 
                     for l in word:
                         action = ord(l) - ord('a')
-                        q_val, _, _ = self.q_model.policy.evaluate_actions(self.q_model.policy.obs_to_tensor(self.q_env.get_obs())[0], torch.Tensor(np.array([action])).to("cuda"))
+                        q_val, _, _ = self.q_model.policy.evaluate_actions(self.q_model.policy.obs_to_tensor(self.q_env.get_obs())[0], torch.Tensor(np.array([action])).to(self.device))
                         _, _, _, _, _ = self.q_env.step(action)
                         curr_qval += q_val
 

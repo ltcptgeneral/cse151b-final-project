@@ -1,0 +1,1 @@
+python eric_wordle/main.py --n 1 --vocab_file wordle_words.txt  --q_model True --model_file wordle_ppo_model --device cpu

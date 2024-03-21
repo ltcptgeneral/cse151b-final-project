@@ -34,16 +34,20 @@ def main(args):
     wins = 0
     num_eval = args.num_eval
 
+    np.random.seed(0)
+
     for i in tqdm(range(num_eval)):
         idx = np.random.choice(range(len(ai.vocab)))
         solution = ai.vocab[idx]
+
+        ai.reset(solution)
+
         guesses, word = ai.solve_eval(results_callback=result_callback)
         if word != solution:
             total_guesses += 5
         else:
             total_guesses += guesses
             wins += 1
-        ai.reset()
 
     print(f"q_model?: {args.q_model} \t average guesses per game: {total_guesses / num_eval} \t win rate: {wins / num_eval}")
 

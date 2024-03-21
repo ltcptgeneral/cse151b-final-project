@@ -5,7 +5,7 @@ import numpy as np
 
 from stable_baselines3 import PPO, DQN
 from letter_guess import LetterGuessingEnv
-
+import torch
 
 def load_valid_words(file_path='wordle_words.txt'):
     """
@@ -37,26 +37,28 @@ class AI:
         self.use_q_model = use_q_model
         if use_q_model:
             # we initialize the same q env as the model train ONLY to simplify storing/calculating the gym state, not used to control the game at all
-            self.q_env = LetterGuessingEnv(vocab_file)
+            self.q_env = LetterGuessingEnv(load_valid_words(vocab_file))
             self.q_env_state, _ = self.q_env.reset()
 
             # load model
             self.q_model = PPO.load(model_file)
 
-        self.reset()
+        self.reset("")
 
     def solve_eval(self, results_callback):
         num_guesses = 0
         while [len(e) for e in self.domains] != [1 for _ in range(self.num_letters)]:
             num_guesses += 1
+            if self.use_q_model:
+                self.freeze_state = self.q_env.clone_state()
 
             # sample a word, this would use the q_env_state if the q_model is used
-            word = self.sample()
+            word = self.sample(num_guesses)
 
             # get emulated results
             results = results_callback(word)
             if self.use_q_model:
-                self.q_env.set_state(self.q_env_state)
+                self.q_env.set_state(self.freeze_state)
                 # step the q_env to match the guess we just made
                 for i in range(len(word)):
                     char = word[i]
@@ -70,13 +72,11 @@ class AI:
         num_guesses = 0
         while [len(e) for e in self.domains] != [1 for _ in range(self.num_letters)]:
             num_guesses += 1
-            word = self.sample()
+            if self.use_q_model:
+                self.freeze_state = self.q_env.clone_state()
 
-            # # Always start with these two words
-            # if num_guesses == 1:
-            #     word = 'soare'
-            # elif num_guesses == 2:
-            #     word = 'culti'
+            # sample a word, this would use the q_env_state if the q_model is used
+            word = self.sample(num_guesses)
 
             print('-----------------------------------------------')
             print(f'Guess #{num_guesses}/{self.num_guesses}: {word}')
@@ -96,10 +96,16 @@ class AI:
                     results.append(result)
                     break
 
-            self.arc_consistency(word, results)
+            if self.use_q_model:
+                self.q_env.set_state(self.freeze_state)
+                # step the q_env to match the guess we just made
+                for i in range(len(word)):
+                    char = word[i]
+                    action = ord(char) - ord('a')
+                    self.q_env_state, _, _, _, _ = self.q_env.step(action)
 
-        print(f'You did it! The word is {"".join([e[0] for e in self.domains])}')
-        return num_guesses
+            self.arc_consistency(word, results)
+        return num_guesses, word
 
     def arc_consistency(self, word, results):
         self.possible_letters += [word[i] for i in range(len(word)) if results[i] == '1']
@@ -119,14 +125,15 @@ class AI:
             if results[i] == '2':
                 self.domains[i] = [word[i]]
 
-    def reset(self):
+    def reset(self, target_word):
         self.domains = [list(string.ascii_lowercase) for _ in range(self.num_letters)]
         self.possible_letters = []
 
         if self.use_q_model:
             self.q_env_state, _ = self.q_env.reset()
+            self.q_env.target_word = target_word
 
-    def sample(self):
+    def sample(self, num_guesses):
         """
         Samples a best word given the current domains
         :return:
@@ -143,15 +150,15 @@ class AI:
         for word, _ in self.best_words:
             # reset the state back to before we guessed a word
             if pattern.match(word) and False not in [e in word for e in self.possible_letters]:
-                if self.use_q_model:
-                    self.q_env.set_state(self.q_env_state)
+                if self.use_q_model and num_guesses == 3:
+                    self.q_env.set_state(self.freeze_state)
                     # Use policy to grade word
                     # get the state and action pairs
                     curr_qval = 0
 
                     for l in word:
                         action = ord(l) - ord('a')
-                        q_val = self.q_model.policy.evaluate_actions(self.q_env.get_obs(), action)
+                        q_val, _, _ = self.q_model.policy.evaluate_actions(self.q_model.policy.obs_to_tensor(self.q_env.get_obs())[0], torch.Tensor(np.array([action])).to("cuda"))
                         _, _, _, _, _ = self.q_env.step(action)
                         curr_qval += q_val
 

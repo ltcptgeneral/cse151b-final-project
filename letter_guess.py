@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import random
 import re
+import copy
 
 
 class LetterGuessingEnv(gym.Env):
@@ -29,8 +30,28 @@ class LetterGuessingEnv(gym.Env):
 
         self.reset()
 
+    def clone_state(self):
+        # Clone the current state
+        return {
+            'target_word': self.target_word,
+            'letter_flags': copy.deepcopy(self.letter_flags),
+            'letter_positions': copy.deepcopy(self.letter_positions),
+            'guessed_letters': copy.deepcopy(self.guessed_letters),
+            'guess_prefix': self.guess_prefix,
+            'round': self.round
+        }
+
+    def set_state(self, state):
+        # Restore the state
+        self.target_word = state['target_word']
+        self.letter_flags = copy.deepcopy(state['letter_flags'])
+        self.letter_positions = copy.deepcopy(state['letter_positions'])
+        self.guessed_letters = copy.deepcopy(state['guessed_letters'])
+        self.guess_prefix = state['guess_prefix']
+        self.round = state['round']
+
     def step(self, action):
-        letter_index = action % 26  # Assuming action is the letter index directly
+        letter_index = action  # Assuming action is the letter index directly
         position = len(self.guess_prefix)  # The next position in the prefix is determined by its current length
         letter = chr(ord('a') + letter_index)
 
@@ -56,8 +77,8 @@ class LetterGuessingEnv(gym.Env):
             reward = 1  # Reward for adding new information by trying a new letter
 
             # Update the letter_positions matrix to reflect the new guess
-            if position == 4: 
-                self.letter_positions[:,:] = 1
+            if position == 4:
+                self.letter_positions[:, :] = 1
             else:
                 self.letter_positions[:, position] = 0
                 self.letter_positions[letter_index, position] = 1
@@ -77,8 +98,8 @@ class LetterGuessingEnv(gym.Env):
             # reward = 5
             done = True
 
-        obs = self._get_obs()
-        
+        obs = self.get_obs()
+
         if reward < -5:
             print(obs, reward, done)
             exit(0)
@@ -93,7 +114,7 @@ class LetterGuessingEnv(gym.Env):
         self.guessed_letters = set()
         self.guess_prefix = ""  # Reset the guess prefix for the new episode
         self.round = 0
-        return self._get_obs(), {}
+        return self.get_obs(), {}
 
     def encode_word(self, word):
         encoded = np.zeros((26,))
@@ -102,7 +123,7 @@ class LetterGuessingEnv(gym.Env):
             encoded[index] = 1
         return encoded
 
-    def _get_obs(self):
+    def get_obs(self):
         return np.concatenate([self.letter_flags.flatten(), self.letter_positions.flatten()])
 
     def render(self, mode='human'):

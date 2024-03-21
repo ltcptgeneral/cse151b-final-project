@@ -56,6 +56,7 @@ class AI:
             # get emulated results
             results = results_callback(word)
             if self.use_q_model:
+                self.q_env.set_state(self.q_env_state)
                 # step the q_env to match the guess we just made
                 for i in range(len(word)):
                     char = word[i]
@@ -141,9 +142,9 @@ class AI:
         best_word = None
         for word, _ in self.best_words:
             # reset the state back to before we guessed a word
-            self.q_env.set_state(self.q_env_state)
             if pattern.match(word) and False not in [e in word for e in self.possible_letters]:
                 if self.use_q_model:
+                    self.q_env.set_state(self.q_env_state)
                     # Use policy to grade word
                     # get the state and action pairs
                     curr_qval = 0
@@ -160,7 +161,6 @@ class AI:
                 else:
                     # otherwise return the word from eric heuristic
                     return word
-        self.q_env.set_state(self.q_env_state)
         return best_word
 
     def get_vocab(self, vocab_file):
